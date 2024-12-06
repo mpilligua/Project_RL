@@ -24,9 +24,11 @@ class ImageToPyTorch(gymnasium.ObservationWrapper):
     def observation(self, observation):
         return np.moveaxis(observation, 2, 0)
 
+
 class ScaledFloatFrame(gym.ObservationWrapper):
     def observation(self, obs):
         return np.array(obs).astype(np.float32) / 255.0
+
 
 def make_env(env_name, skip = 4, stack_size=4, reshape_size = (84, 84), render_mode=None):
     env = gym.make(env_name, render_mode=render_mode)
@@ -75,7 +77,7 @@ def make_DQN(input_shape, output_shape):
     )
     return net
 
-Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'reward', 'done', 'new_state'])
+Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'combined_reward', 'combined_done', 'next_new_state'])
 
 class ExperienceReplay:
     def __init__(self, capacity):
@@ -89,10 +91,12 @@ class ExperienceReplay:
 
     def sample(self, BATCH_SIZE):
         indices = np.random.choice(len(self.buffer), BATCH_SIZE, replace=False)
-        states, actions, rewards, dones, next_states = zip(*[self.buffer[idx] for idx in indices])
+        states, actions, combined_rewards, combined_dones, next_new_state = zip(*[self.buffer[idx] for idx in indices])
         
-        return np.array(states), np.array(actions), np.array(rewards, dtype=np.float32), \
-               np.array(dones, dtype=np.uint8), np.array(next_states)
+        return np.array(states), np.array(actions), np.array(combined_rewards, dtype=np.float32), \
+               np.array(combined_dones, dtype=np.uint8), np.array(next_new_state)
+          
+          
           
 def create_and_save_gif(net, save_gif = 'video.gif'): # CREDITS JORDI
     env = make_env(ENV_NAME, render_mode='rgb_array')
@@ -119,48 +123,73 @@ def create_and_save_gif(net, save_gif = 'video.gif'): # CREDITS JORDI
         total_reward += reward  
     
     print("Total reward: %.2f" % total_reward)
-    images[0].save(save_gif, save_all=True, append_images=images[1:], duration=120, loop=0)      
-    return total_reward         
+    images[0].save(save_gif, save_all=True, append_images=images[1:], duration=100, loop=0)               
                
                
 class Agent:
-    def __init__(self, env, exp_replay_buffer):
+    def __init__(self, env, gamma, exp_replay_buffer):
         self.env = env
         self.exp_replay_buffer = exp_replay_buffer
+        self.gamma = gamma
         self._reset()
 
     def _reset(self):
         self.current_state = self.env.reset()[0]
         self.total_reward = 0.0
+        self.number_of_frames_per_episode = 0
 
     def step(self, net, epsilon=0.0, device="cpu"):
         done_reward = None
-        if np.random.random() < epsilon:
-            action = env.action_space.sample()
-        else:
-            state_ = np.array([self.current_state])
-            state = torch.tensor(state_).to(device)
-            q_vals = net(state)
-            _, act_ = torch.max(q_vals, dim=1)
-            action = int(act_.item())
+        done_number_steps = None
+        def get_action(state):
+            if np.random.random() < epsilon:
+                action = self.env.action_space.sample()
+            else:
+                state_ = np.array([state])
+                state = torch.tensor(state_).to(device)
+                q_vals = net(state)
+                _, act_ = torch.max(q_vals, dim=1)
+                action = int(act_.item())
 
+            return action
+        # First Step
+        action = get_action(self.current_state)
         new_state, reward, terminated, truncated, _ = self.env.step(action)
         is_done = terminated or truncated
         self.total_reward += reward
-
-        exp = Experience(self.current_state, action, reward, is_done, new_state)
+        
+        self.number_of_frames_per_episode += 1
+        if not is_done:  # Only take a second step if the first is not terminal
+            next_action = get_action(new_state)
+            next_new_state, next_reward, terminated, truncated, _ = self.env.step(next_action)
+            next_done = terminated or truncated
+            self.number_of_frames_per_episode += 1
+        else:
+            next_new_state = new_state
+            next_reward = 0
+            next_done = True
+        
+        combined_reward = reward + self.gamma * next_reward
+        combined_done = is_done or next_done
+        
+        exp = Experience(self.current_state, action, combined_reward, combined_done, next_new_state)
         self.exp_replay_buffer.append(exp)
-        self.current_state = new_state
+        
+        # Update the current state, either to the one produced calling step one time or two times depending it the agent arrived to a terminal state or not
+        self.current_state = next_new_state
         
         if is_done:
             done_reward = self.total_reward
+            done_number_steps = self.number_of_frames_per_episode
             self._reset()
+            
         
-        return done_reward
+        return done_reward, done_number_steps
 
 
-MEAN_REWARD_BOUND = 18.0 
-NUMBER_OF_REWARDS_TO_AVERAGE = 10          
+
+MEAN_REWARD_BOUND = 32
+NUMBER_OF_REWARDS_TO_AVERAGE = 100          
 
 GAMMA = 0.99   
     
@@ -177,22 +206,26 @@ EPS_MIN = 0.02
 
 # start a new wandb run to track this script
 import os
-idx = os.listdir("/home/nbiescas/Desktop/Tennis").__len__()
-wandb.init(project="Tennis", name=f"Tennis_{idx}")
-os.makedirs(f"/home/nbiescas/Desktop/Tennis/Tennis_{idx}", exist_ok=True)
+idx = os.listdir("/fhome/pmlai10/Project_RL/freeway").__len__()
+wandb.init(project="Freeway", name=f"freeway_{idx}")
+os.makedirs(f"/fhome/pmlai10/Project_RL/freeway/freewayDQNExtension_{idx}", exist_ok=True)
 
+print("Saving to: ", f"/fhome/pmlai10/Project_RL/freeway/freewayDQNExtension_{idx}")
 if torch.cuda.is_available():
     device = torch.device("cuda")
 else:
     device = torch.device("cpu")
 
 warnings.filterwarnings('ignore')
-ENV_NAME = "ALE/Tennis-v5"
+ENV_NAME = "ALE/Freeway-v5"
 
 
 env_config = {"skip": 4,
                 "stack_size": 4,
-                "reshape_size": (84, 84)}
+                "reshape_size": (84, 84),
+                "render_mode": None,
+                "env_name": ENV_NAME
+                }
 
 env = make_env(ENV_NAME)
 
@@ -203,28 +236,32 @@ net = make_DQN(env.observation_space.shape, env.action_space.n).to(device)
 target_net = make_DQN(env.observation_space.shape, env.action_space.n).to(device)
  
 buffer = ExperienceReplay(EXPERIENCE_REPLAY_SIZE)
-agent = Agent(env, buffer)
+agent = Agent(env, GAMMA, buffer)
 
 epsilon = EPS_START
 optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 total_rewards = []
-frame_number = 0  
+number_of_frames_Episodes = []
+frame_number = 0
+
+mse_loss = nn.MSELoss()
 
 while True:
     frame_number += 1
     epsilon = max(epsilon * EPS_DECAY, EPS_MIN)
 
-    reward = agent.step(net, epsilon, device=device)
+    reward, done_number_steps = agent.step(net, epsilon, device=device)
     if frame_number % 10000 == 0:
-        total_reward = create_and_save_gif(net.to("cuda"), save_gif=f"/home/nbiescas/Desktop/Tennis/Tennis_{idx}/frame_" + str(frame_number) + ".gif")
-        wandb.log({"total_reward": total_reward}, step=frame_number)
+        create_and_save_gif(net.to("cuda"), save_gif=f"/fhome/pmlai10/Project_RL/freeway/freewayDQNExtension_{idx}/frame_" + str(frame_number) + ".gif")
         
     if reward is not None:
         total_rewards.append(reward)
-
+        number_of_frames_Episodes.append(done_number_steps)
         mean_reward = np.mean(total_rewards[-NUMBER_OF_REWARDS_TO_AVERAGE:])
+        mean_number_of_frames_episodes = np.mean(number_of_frames_Episodes[-NUMBER_OF_REWARDS_TO_AVERAGE:])        
         print(f"Frame:{frame_number} | Total games:{len(total_rewards)} | Mean reward: {mean_reward:.3f}  (epsilon used: {epsilon:.2f})")
-        wandb.log({"epsilon": epsilon, "reward_100": mean_reward, "reward": reward}, step=frame_number)
+        wandb.log({"epsilon": epsilon, "reward_100": mean_reward, "reward": reward,
+                   "numberFrames_100": mean_number_of_frames_episodes, "Farmes per episode": done_number_steps}, step=frame_number)
 
         if mean_reward > MEAN_REWARD_BOUND:
             print(f"SOLVED in {frame_number} frames and {len(total_rewards)} games")
@@ -249,7 +286,7 @@ while True:
     next_state_values = next_state_values.detach()
 
     expected_Q_values = next_state_values * GAMMA + rewards
-    loss = nn.MSELoss()(Q_values, expected_Q_values)
+    loss = mse_loss(Q_values, expected_Q_values)
 
     optimizer.zero_grad()
     loss.backward()
@@ -257,3 +294,8 @@ while True:
 
     if frame_number % SYNC_TARGET_NETWORK == 0:
         target_net.load_state_dict(net.state_dict())
+        
+        
+# Save the last model
+torch.save(net.state_dict(), f"/fhome/pmlai10/Project_RL/freeway/freewayDQNExtension_{idx}/net.pth")    
+
