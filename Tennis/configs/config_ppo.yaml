@@ -1,0 +1,7 @@
+policy_type: CnnPolicy
+total_timesteps: 250000
+export_path: ./exports/
+model_name: ppo
+eval_freq: 10000
+n_envs: 1
+
