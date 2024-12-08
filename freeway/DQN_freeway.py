@@ -161,7 +161,7 @@ class Agent:
 
 
 MEAN_REWARD_BOUND = 19.0 
-NUMBER_OF_REWARDS_TO_AVERAGE = 10          
+NUMBER_OF_REWARDS_TO_AVERAGE = 100        
 
 GAMMA = 0.99   
     

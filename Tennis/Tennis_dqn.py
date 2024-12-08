@@ -24,11 +24,9 @@ class ImageToPyTorch(gymnasium.ObservationWrapper):
     def observation(self, observation):
         return np.moveaxis(observation, 2, 0)
 
-
 class ScaledFloatFrame(gym.ObservationWrapper):
     def observation(self, obs):
         return np.array(obs).astype(np.float32) / 255.0
-
 
 def make_env(env_name, skip = 4, stack_size=4, reshape_size = (84, 84), render_mode=None):
     env = gym.make(env_name, render_mode=render_mode)

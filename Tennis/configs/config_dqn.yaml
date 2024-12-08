@@ -1,0 +1,16 @@
+policy_type: CnnPolicy
+total_timesteps: 1000000
+model_name: dqn
+eval_freq: 10000
+n_envs: 1
+
+model_arguments:
+  buffer_size: 30000
+  learning_rate: 0.0001
+  batch_size: 32
+  learning_starts: 100000
+  target_update_interval: 1000
+  train_freq: 4
+  gradient_steps: 1
+  exploration_fraction: 0.1
+  exploration_final_eps: 0.01
