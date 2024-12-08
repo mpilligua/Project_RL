@@ -18,6 +18,14 @@ import collections
 from PIL import Image
 
 import ale_py
+from PIL import ImageDraw, ImageFont
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 gym.register_envs(ale_py)
 
@@ -54,47 +62,74 @@ def make_env(env_name, skip=4, stack_size=4, reshape_size=(84, 84), render_mode=
     
     return env
 
-def make_DQN(input_shape, output_shape):
-    net = nn.Sequential(
-        nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
-        nn.ReLU(),
-        nn.Conv2d(32, 64, kernel_size=4, stride=2),
-        nn.ReLU(),
-        nn.Conv2d(64, 64, kernel_size=3, stride=1),
-        nn.ReLU(),
-        nn.Flatten(),
-        nn.Linear(64*7*7, 512),
-        nn.ReLU(),
-        nn.Linear(512, output_shape)
-    )
-    return net
-
-def create_and_save_gif(net, device, save_gif='video.gif'):  # CREDITS JORDI
-    env = make_env(ENV_NAME, render_mode='rgb_array')
-    current_state = env.reset()[0]
-    print(current_state)
-    is_done = False
+class DQN(nn.Module):
+    def __init__(self, input_shape, output_shape):
+        super(DQN, self).__init__()
+        
+        self.net = nn.Sequential(
+            nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64*7*7, 512),
+            nn.ReLU(),
+            nn.Linear(512, output_shape)
+        )
     
+    def forward(self, x):
+        return self.net(x)
+        
+
+
+def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CREDITS JORDI
+    current_state = env.reset()[0]
+    
+    done = False
     images = []
-    visualize = True
     total_reward = 0.0
-    while not is_done:
-        if visualize:
-            img = env.render()
-            images.append(Image.fromarray(img))
-            
+    t = 0
+    
+    while not done:
+        img = env.render()
+        img_pil = Image.fromarray(img)
+        draw = ImageDraw.Draw(img_pil) 
+        
         state_ = np.array([current_state])
         state = torch.tensor(state_).to(device)
         q_vals = net(state)
-        _, act_ = torch.max(q_vals, dim=1)
-        action = int(act_.item())
+        action = np.argmax(q_vals)
+        
+        # Add the step number to the upper-left corner of the image
+        font = ImageFont.load_default() 
+        draw.text((10, 10), f"Step: {t}", fill="white", font=font)
 
-        current_state, reward, terminated, truncated, _ = env.step(action)
-        is_done = terminated or truncated    
-        total_reward += reward  
+        # Add the epoch number centered at the top of the image
+        epoch_text = f"Episode: {epoch}"
+        text_bbox = draw.textbbox((0, 0), epoch_text, font=font) 
+        text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
+        draw.text(((img_pil.width - text_width) // 2, 10), epoch_text, fill="white", font=font)
     
-    print("Total reward: %.2f" % total_reward)
+        # Add the current reward to the top-right corner of the image
+        total_reward += reward
+        reward_text = f"Reward: {total_reward:.2f}"
+        text_bbox = draw.textbbox((0, 0), reward_text, font=font)
+        text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
+        draw.text((img_pil.width - text_width - 10, 10), reward_text, fill="white", font=font)
+        
+        current_state, reward, terminated, truncated, _ = env.step(action)
+        done = terminated or truncated    
+        total_reward += reward  
+        images.append(img_pil)
+        
+        t += 1
+        
     images[0].save(save_gif, save_all=True, append_images=images[1:], duration=100, loop=0)
+    
+    env.close()
+    return total_reward
 
 Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'combined_reward', 'combined_done', 'next_new_state'])
 
@@ -107,17 +142,11 @@ class RainbowDQN_Agent:
     """
 
     def __init__(self, 
-                 env: gym.Env, 
-                 dnnetwork: nn.Module, 
-                 buffer: ExperienceReplay,
-                 batch_size: int = 32,
-                 epsilon: float = 1.0,
-                 eps_decay: float = 0.999985,
-                 use_double_dqn: bool = False,
-                 use_two_step_dqn: bool = False,
-                 use_dueling_dqn: bool = False,
-                 use_noise_dqn: bool = False,
-                 reward_threshold: float = 32.0):
+                 train_env: gym.Env,
+                 eval_env: gym.Env, 
+                 config: dict,
+                 device: torch.device,
+                 results_dir: str = None):
         """
         Initialize the Rainbow DQN Agent.
 
@@ -135,7 +164,19 @@ class RainbowDQN_Agent:
             reward_threshold (float, optional): The average reward threshold to consider the environment as solved. Defaults to 32.0.
         """
         super().__init__()
-        self.env = env
+        self.train_env = train_env
+        self.eval_env = eval_env
+        
+        self.dqn_extensions = config['dqn_extensions']
+        
+        self.buffer = setup_buffer(self.dqn_extensions['use_prioritized_buffer'], config)
+        
+        if self.dqn_extensions['use_noisy_dqn']:
+            # Ensure consistent initialization by passing necessary parameters
+            dnnetwork = Noisy_DQN(self.train_env.observation_space.shape, self.train_env.action_space.n, noisy_std = 0.1, device=device).to(device)
+        else:
+            dnnetwork = DQN(self.train_env.observation_space.shape, self.train_env.action_space.n).to(device)
+        
         # Networks
         self.dnnetwork = dnnetwork.to(device)
         self.target_network = deepcopy(dnnetwork).to(device)
@@ -143,22 +184,16 @@ class RainbowDQN_Agent:
         # Loss function
         self.mse_loss = nn.MSELoss()
         
-        # Experience replay buffer
-        self.buffer = buffer
-        self.batch_size = batch_size
+        self.batch_size = config['batch_size']
         
         # Optimizer for training the network
-        self.optimizer = optim.Adam(self.dnnetwork.parameters(), lr=LEARNING_RATE)
-
-    
-        # Reward threshold to determine when the environment is solved
-        self.reward_threshold = reward_threshold
+        self.optimizer = optim.Adam(self.dnnetwork.parameters(), lr=config['learning_rate'])
         
         # Flags to determine which DQN extensions to use
-        self.double_dqn = use_double_dqn
-        self.two_step_dqn = use_two_step_dqn
-        self.dueling_dqn = use_dueling_dqn
-        self.use_noise_dqn = use_noise_dqn
+        self.double_dqn = dqn_extensions['use_double_dqn']
+        self.two_step_dqn = dqn_extensions['use_two_step_dqn']
+        self.dueling_dqn = dqn_extensions['use_dueling_dqn']
+        self.use_noise_dqn = dqn_extensions['use_noisy_dqn']
         
         # Metrics for tracking performance
         self.total_rewards = []
@@ -166,14 +201,21 @@ class RainbowDQN_Agent:
         self.update_loss = []
         
         # Exploration parameters for epsilon-greedy strategy
-        self.epsilon = epsilon
-        self.eps_decay = eps_decay
+        self.epsilon = config["eps_start"]
+        self.eps_decay = config["eps_decay"]
+        self.eps_min = config["eps_min"]
+        
+        self.gamma=config["gamma"]
+        self.max_frames = config["max_frames"]
+        self.dnn_upd_freq = config["dnn_upd"]
+        self.dnn_sync_freq = config["dnn_sync"]
         
         # Frame counter to keep track of the number of steps taken
         self.frame_number = 0
         
         # Check if the replay buffer uses prioritized experience replay
-        self.prioritized_buffer = isinstance(buffer, PrioritizedExperienceReplayBuffer)
+        self.prioritized_buffer = dqn_extensions['use_prioritized_buffer']
+        self.results_dir = results_dir
         
         # Reset any noise in the network if using Noisy DQN
         self.reset_noise()
@@ -242,34 +284,27 @@ class RainbowDQN_Agent:
         
         return done_reward, done_number_steps
 
-    def train(self, gamma=0.99, 
-              max_frames=50000,
-              dnn_update_frequency=4, 
-              dnn_sync_frequency=2000,
-              device="cuda"):
-        
-        self.gamma = gamma
-        print("Filling replay buffer...", flush=True)
+    def train(self):
+        logger.info("Filling replay buffer...")
 
         while self.buffer.burn_in_capacity() < 1:
             self.take_step(self.epsilon, mode='explore', device=device)
             self.frame_number += 1
-            if self.use_noise_dqn and (self.frame_number % NOISE_UPD == 0):
+            if self.use_noise_dqn and (self.frame_number % self.noise_upd_freq == 0):
                 self.reset_noise()
             
         episode = 0
-        training = True
-        print("Training...", flush=True)
+        logger.info("Training...")
 
-        while training:
+        while True:
             self.frame_number +=1
             
             done_reward, done_number_steps = self.take_step(self.epsilon, mode='train', device=device)
 
-            if self.frame_number % dnn_update_frequency == 0:
+            if self.frame_number % self.dnn_upd_freq == 0:
                     self.update(device)
                     
-            if self.frame_number % dnn_sync_frequency == 0:
+            if self.frame_number % self.dnn_sync_freq == 0:
                 self.target_network.load_state_dict(self.dnnetwork.state_dict())
                 
             if done_reward is not None:
@@ -277,33 +312,34 @@ class RainbowDQN_Agent:
                 self.total_rewards.append(done_reward)
                 self.number_of_frames_Episodes.append(done_number_steps)
                 mean_reward = np.mean(self.total_rewards[-NUMBER_OF_REWARDS_TO_AVERAGE:])
-                print(f"Frame:{self.frame_number} | Total games:{len(self.total_rewards)} | Mean reward: {mean_reward:.3f}  (epsilon used: {self.epsilon:.2f})", flush=True)
+                
+                logger.info(f"Frame:{self.frame_number} | Total games:{len(self.total_rewards)} | Mean reward: {mean_reward:.3f}  (epsilon used: {self.epsilon:.2f})")
+                
                 wandb.log({"epsilon": self.epsilon, "reward_100": mean_reward, "reward": done_reward,
                             "Frames per episode": done_number_steps}, step=self.frame_number)
         
                 episode += 1
             
-                if self.frame_number >= max_frames:
-                    training = False
-                    print('\nFrame limit reached.')
+                if self.frame_number >= self.max_frames:
+                    logger.info('\nFrame limit reached.')
                     break
 
                 # The game ends if the average reward has reached the threshold
-                if mean_reward >= self.reward_threshold:
-                    training = False
-                    print('\nEnvironment solved in {} episodes!'.format(episode))
+                if mean_reward >= self.train_env.reward_threshold:
+                    logger.info('\nEnvironment solved in {} episodes!'.format(episode))
                     break
                 
-            if self.frame_number % 10000 == 0:
-                print("Visualizing the model...", flush=True)
-                create_and_save_gif(self.dnnetwork, 
-                                    device=device, 
-                                    save_gif=f"/fhome/pmlai10/Project_RL/freeway/RainbowDQN_{idx}/frame_" + str(self.frame_number) + ".gif")
-            
+                if self.episode % 100 == 0:
+                    logger.info("Visualizing the model...")
+                    create_and_save_gif(self.dnnetwork, 
+                                        eval_env,
+                                        device=device, 
+                                        save_gif=f"{self.results_dir}/frame_{str(self.episode)}.gif",
+                                        epoch=episode)
+                
             if self.epsilon is not None:         
-                self.epsilon = max(self.epsilon * self.eps_decay, EPS_MIN)
-
-                    
+                self.epsilon = max(self.epsilon * self.eps_decay, self.eps_min)
+                   
     def calculate_loss(self, batch, weights, idxs, device="cpu"):
         states, actions, rewards, dones, next_states = map(np.array, zip(*batch))
         rewards = torch.FloatTensor(rewards).to(device)
@@ -354,112 +390,55 @@ class RainbowDQN_Agent:
         self.total_reward = 0
         self.number_of_frames_per_episode = 0
 
-# Start a new wandb run to track this script
-import os
-idx = len(os.listdir("/fhome/pmlai10/Project_RL/freeway"))
-wandb.init(project="Freeway", name=f"freeway_{idx}")
-os.makedirs(f"/fhome/pmlai10/Project_RL/freeway/RainbowDQN_{idx}", exist_ok=True)
 
-print("Saving to: ", f"/fhome/pmlai10/Project_RL/freeway/RainbowDQN_{idx}")
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
-
-warnings.filterwarnings('ignore')
-
-ENV_NAME = "ALE/Freeway-v5"
-MEAN_REWARD_BOUND = 21.0
-NUMBER_OF_REWARDS_TO_AVERAGE = 100          
-
-GAMMA = 0.99   
+def setup_buffer(use_prioritized_buffer, config):
+    EXPERIENCE_REPLAY_SIZE = config['experience_replay_size']
+    config_prioritized_buffer = config['prioritized_buffer_config']
     
-BATCH_SIZE = 32  
-LEARNING_RATE = 1e-4           
+    if use_prioritized_buffer:
+        buffer = PrioritizedExperienceReplayBuffer(
+            experience_replay_size=EXPERIENCE_REPLAY_SIZE,
+            alpha=config_prioritized_buffer['alpha'],
+            small_constant=config_prioritized_buffer['small_constant'],
+            growth_rate=config_prioritized_buffer['growth_rate'],
+            beta=config_prioritized_buffer['beta']
+        )
+    else:
+        buffer = ExperienceReplay(capacity=EXPERIENCE_REPLAY_SIZE)
+    return buffer
 
-EXPERIENCE_REPLAY_SIZE = 10000            
-SYNC_TARGET_NETWORK = 1000     
+if __name__ == "__main__":
+    import os
+    import time
+    from configs.Rainbow_DQN import * # <--- All hyperparameters are defined here
+    import logging
+    
+    idx = time.strftime("%d%H%M")
+    name_run = f"freeway_rainbow_{idx}"
+    
+    wandb.init(project="Freeway", name=name_run)
+    results_dir = f"/fhome/pmlai10/Project_RL/freeway/{name_run}"
 
-EPS_START = 1.0
-EPS_DECAY = 0.9999
-EPS_MIN = 0.02
+    os.makedirs(results_dir, exist_ok=True)
+    print("Saving to: ", results_dir)
 
-DNN_UPD = 5
-NOISE_UPD = 11000
-DNN_SYNC = 1000
-MAX_FRAMES = 1000000
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-use_noisy_dqn = True
-use_double_dqn = True
-use_two_step_dqn = True
-use_dueling_dqn = True
-use_prioritized_buffer = True
+    # warnings.filterwarnings('ignore')
 
-if use_prioritized_buffer:
-    buffer = PrioritizedExperienceReplayBuffer(
-        memory_size=EXPERIENCE_REPLAY_SIZE,
-        burn_in=10000,
-        alpha=0.6,
-        small_constant=0.05,
-        growth_rate=1.0005,
-        beta=0.4
+    train_env = make_env(**train_env_config)
+    eval_env = make_env(**eval_env_config)
+    
+    # Initialize the agent
+    agent = RainbowDQN_Agent(
+        train_env=train_env,
+        eval_env=eval_env, 
+        config=training_config,
+        device=device
     )
-else:
-    buffer = ExperienceReplay(EXPERIENCE_REPLAY_SIZE)
 
-env = make_env(ENV_NAME)
+    wandb.config.update(all_configs)
 
-if use_noisy_dqn:
-    # Ensure consistent initialization by passing necessary parameters
-    net = Noisy_DQN(env.observation_space.shape, env.action_space.n, noisy_std = 0.1, device=device).to(device)
-else:
-    net = make_DQN(env.observation_space.shape, env.action_space.n).to(device)
-
-# Remove target_net initialization from main script as it's handled within the agent
-
-# Initialize the agent
-agent = RainbowDQN_Agent(
-    env=env, 
-    dnnetwork=net,
-    buffer=buffer,
-    epsilon=EPS_START,
-    eps_decay=EPS_DECAY,
-    batch_size=BATCH_SIZE,
-    use_double_dqn=use_double_dqn,
-    use_two_step_dqn=use_two_step_dqn,
-    use_dueling_dqn=use_dueling_dqn,
-    use_noise_dqn=use_noisy_dqn,
-    reward_threshold=MEAN_REWARD_BOUND  # Pass the reward threshold
-)
-
-env_config = {
-    "skip": 4,
-    "stack_size": 4,
-    "reshape_size": (84, 84),
-    "render_mode": None,
-    "env_name": ENV_NAME,
-    "use_noisy_dqn": use_noisy_dqn,
-    "use_double_dqn": use_double_dqn,
-    "use_two_step_dqn": use_two_step_dqn,
-    "use_dueling_dqn": use_dueling_dqn,
-    "use_prioritized_buffer": use_prioritized_buffer,
-    "gamma": GAMMA,
-    "batch_size": BATCH_SIZE,
-    "learning_rate": LEARNING_RATE,
-    "experience_replay_size": EXPERIENCE_REPLAY_SIZE,
-    "sync_target_network": SYNC_TARGET_NETWORK,
-    "eps_start": EPS_START,
-    "eps_decay": EPS_DECAY
-}        
-wandb.config.update(env_config)
-
-# Train the agent
-print("Training the agent...", flush=True)
-
-agent.train(
-    gamma=GAMMA, 
-    max_frames=MAX_FRAMES,
-    dnn_update_frequency=DNN_UPD, 
-    dnn_sync_frequency=DNN_SYNC,
-    device=device
-)
+    print("Training the agent...", flush=True)
+    agent.train()
+#

@@ -86,12 +86,12 @@ class CustomEvalCallback(BaseCallback):
             minutes, seconds = divmod(remainder, 60)
 
             # Print the result
-            print(f"Step {self.n_calls}: Elapsed time: {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
+            print(f"Step {self.n_calls}: Elapsed time: {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds", flush=True)
             if self.n_calls < self.learning_starts:
-                print(f"Step {self.n_calls}: Skipping evaluation as learning has not started yet")
+                print(f"Step {self.n_calls}: Skipping evaluation as learning has not started yet", flush=True)
                 return True
             mean_reward, std_reward = self.evaluate_policy(self.n_calls)
-            print(f"Step {self.n_calls}: Evaluation reward: {mean_reward:.2f} ± {std_reward:.2f}")
+            print(f"Step {self.n_calls}: Evaluation reward: {mean_reward:.2f} ± {std_reward:.2f}", flush=True)
         return True
 
     def evaluate_policy(self, calls):
@@ -175,16 +175,16 @@ class ActionPenaltyWrapper(RewardWrapper):
 def return_model(cfg, env):
     send_cfg = cfg['model_arguments'] if 'model_arguments' in cfg else {}
     if cfg['model_name'] == 'ppo':
-        print("Creating PPO model")
+        print("Creating PPO model", flush=True)
         model = PPO(cfg['policy_type'], env, **send_cfg)
     elif cfg['model_name'] == 'dqn':
-        print("Creating DQN model")
+        print("Creating DQN model", flush=True)
         model = DQN(cfg['policy_type'], env, **send_cfg)
     elif cfg['model_name'] == 'a2c':
-        print("Creating A2C model")
+        print("Creating A2C model", flush=True)
         model = A2C(cfg['policy_type'], env, **send_cfg)
     elif cfg['model_name'] == 'sac':
-        print("Creating SAC model")
+        print("Creating SAC model", flush=True)
         model = SAC(cfg['policy_type'], env, **send_cfg)
     else:
         raise ValueError("Model name not recognized")

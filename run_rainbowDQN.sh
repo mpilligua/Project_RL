@@ -8,4 +8,4 @@
 #SBATCH -e /fhome/pmlai10/Project_RL/error_folder/%x_%u_%j.err # File to which STDERR will be written
 #SBATCH --gres gpu:1 # Para pedir gráficas
 
-python3 /fhome/pmlai10/Project_RL/reinbow_dqn.py
+python3 /fhome/pmlai10/Project_RL/rainbow_dqn.py
