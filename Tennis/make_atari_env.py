@@ -42,6 +42,24 @@ class ScaledFloatFrame(gym.ObservationWrapper):
     def observation(self, obs):
         return np.array(obs).astype(np.float32) / 255.0
 
+from tqdm.notebook import tqdm
+from stable_baselines3.common.callbacks import BaseCallback
+
+class TqdmCallback(BaseCallback):
+    def __init__(self):
+        super().__init__()
+        self.progress_bar = None
+    
+    def _on_training_start(self):
+        self.progress_bar = tqdm(total=self.locals['total_timesteps'])
+    
+    def _on_step(self):
+        self.progress_bar.update(1)
+        return True
+
+    def _on_training_end(self):
+        self.progress_bar.close()
+        self.progress_bar = None
 
 def make_env(env_name, skip=4, stack_size=2, reshape_size=(84, 84), render_mode="rgb_array"):
     env = gym.make(env_name, render_mode=render_mode)  # Explicitly set render_mode to "rgb_array"
@@ -146,31 +164,21 @@ def make_env_sb3(render_mode=None, val=False):
     env = Monitor(env)
     return env
 
+from stable_baselines3.common.vec_env import VecEnvWrapper
 
-class ActionPenaltyWrapper(RewardWrapper):
-    def __init__(self, env, max_consecutive_zeros=5, penalty_reward=-10.0):
-        super().__init__(env)
-        self.max_consecutive_zeros = max_consecutive_zeros
-        self.penalty_reward = penalty_reward
-        self.consecutive_zeros = 0
+class TennisRewardVecWrapper(VecEnvWrapper):
+    def __init__(self, venv, penalty=-0.1):
+        super(TennisRewardVecWrapper, self).__init__(venv)
+        self.penalty = penalty
 
-    def reset(self, **kwargs):
-        self.consecutive_zeros = 0
-        return super().reset(**kwargs)
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        done = terminated or truncated
-        
-        if action == 0:
-            self.consecutive_zeros += 1
-        else:
-            self.consecutive_zeros = 0
-        
-        if self.consecutive_zeros > self.max_consecutive_zeros:
-            reward += self.penalty_reward  # Apply penalty
-        
-        return obs, reward, terminated, truncated, info
+    def step_wait(self):
+        obs, rewards, dones, infos = self.venv.step_wait()
+        # Penalize for 'noop' actions (if applicable)
+        modified_rewards = [
+            reward + self.penalty if info.get("noop_action", False) else reward
+            for reward, info in zip(rewards, infos)
+        ]
+        return obs, modified_rewards, dones, infos
 
 def return_model(cfg, env):
     send_cfg = cfg['model_arguments'] if 'model_arguments' in cfg else {}
@@ -195,7 +203,7 @@ ENV_NAME = "ALE/Tennis-v5"
 if __name__ == "__main__":
     assert len(sys.argv) == 2, "Usage: python SB3_Tennis.py <config_file>"
     assert os.path.exists(sys.argv[1]), f"Config  {sys.argv[1]} not found"
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
     print("Loading configuration from:", sys.argv[1])
     global time
     global export_path
@@ -205,7 +213,7 @@ if __name__ == "__main__":
         config = yaml.safe_load(file)
     
     model_name = f"{config['model_name']}-{time}"
-    config['export_path'] = f"/fhome/pmlai10/Project_RL/Tennis/runs/{model_name}"
+    config['export_path'] = f"/home/nbiescas/Project_RL/Tennis/runs/{model_name}"
     export_path = config['export_path']
 
     #Save the yaml
@@ -215,6 +223,7 @@ if __name__ == "__main__":
         yaml.dump(config, file)
     # Create environment
     env = make_atari_env("ALE/Tennis-v5", n_envs=config['n_envs'], seed=0)
+    env = TennisRewardVecWrapper(env)
     # Train and evaluate models
     run = wandb.init(project="Tennis", 
                      group=config['model_name'],
@@ -232,12 +241,14 @@ if __name__ == "__main__":
         learning_starts = 0
     print(f"Learning starts at: {learning_starts}")
     eval_callback = CustomEvalCallback(eval_env=env, learning_starts = learning_starts, eval_freq=config['eval_freq'], verbose=2)
-    callback = CallbackList([eval_callback, WandbCallback()])
+    tqdm_callback = TqdmCallback()
+    callback = CallbackList([eval_callback, tqdm_callback, WandbCallback()])
 
     print(f'\n>>> Creating and training model {config["model_name"]}...')
     print("Saving logs at:", config['export_path'])
 
     model = return_model(config, env)
+    print("Learning started")
     model.learn(total_timesteps=config["total_timesteps"], callback = callback)
 
     model.save(os.path.join(config["export_path"], model_name))

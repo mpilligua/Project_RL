@@ -1,4 +1,3 @@
-Can you log also the reward using steps the number of frames, and also the loss value: import os
 from datetime import datetime
 from stable_baselines3 import DQN, A2C, PPO, SAC
 from stable_baselines3.common.vec_env import DummyVecEnv, VecVideoRecorder, VecFrameStack
