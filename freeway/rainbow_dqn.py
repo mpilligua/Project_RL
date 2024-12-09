@@ -58,11 +58,14 @@ def make_env(env_name, skip=4, stack_size=4, reshape_size=(84, 84), render_mode=
     env.spec.reward_threshold = 21.0
     return env
 
-class DQN(nn.Module):
-    def __init__(self, input_shape, output_shape):
+
+class DQN(torch.nn.Module):# CREDITS: Jordi 
+
+    def __init__(self, input_shape, output_shape, device='cpu'):
         super(DQN, self).__init__()
-        
-        self.net = nn.Sequential(
+        self.device = device
+
+        self.model = nn.Sequential(
             nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
@@ -74,11 +77,28 @@ class DQN(nn.Module):
             nn.ReLU(),
             nn.Linear(512, output_shape)
         )
-    
-    def forward(self, x):
-        return self.net(x)
-        
 
+    def get_action(self, state, epsilon=0.05):
+        if np.random.random() < epsilon:
+
+            action = np.random.choice(self.actions)
+        else:
+
+            qvals = self.get_qvals(state)
+            action= torch.max(qvals, dim=-1)[1].item()
+
+        return action
+
+    def forward(self, x):
+        return self.model(x)
+    
+    def get_qvals(self, state):
+        if type(state) is tuple:
+            state = np.array([np.ravel(s) for s in state])
+
+        state_t = torch.tensor(state, dtype=torch.float, device=self.device)
+
+        return self.model(state_t)
 
 def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CREDITS JORDI
     current_state = env.reset()[0]
@@ -172,7 +192,8 @@ class RainbowDQN_Agent:
             # Ensure consistent initialization by passing necessary parameters
             dnnetwork = Noisy_DQN(self.train_env.observation_space.shape, self.train_env.action_space.n, noisy_std = 0.1, device=device).to(device)
         else:
-            dnnetwork = DQN(self.train_env.observation_space.shape, self.train_env.action_space.n).to(device)
+            dnnetwork = DQN(self.train_env.observation_space.shape, self.train_env.action_space.n, device= device).to(device)
+
         
         # Networks
         self.dnnetwork = dnnetwork.to(device)
@@ -398,6 +419,7 @@ class RainbowDQN_Agent:
 def setup_buffer(use_prioritized_buffer, config):
     EXPERIENCE_REPLAY_SIZE = config['experience_replay_size']
     config_prioritized_buffer = config['prioritized_buffer_config']
+    burn_in = config['burn_in']
     
     if use_prioritized_buffer:
         buffer = PrioritizedExperienceReplayBuffer(
@@ -408,7 +430,7 @@ def setup_buffer(use_prioritized_buffer, config):
             beta=config_prioritized_buffer['beta']
         )
     else:
-        buffer = ExperienceReplay(capacity=EXPERIENCE_REPLAY_SIZE)
+        buffer = ExperienceReplay(capacity=EXPERIENCE_REPLAY_SIZE, burn_in=burn_in)
     return buffer
 
 def log(msg):
@@ -432,6 +454,7 @@ if __name__ == "__main__":
     
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(f"{results_dir}/videos", exist_ok=True)
+    
     # initialize logging file
     logging.basicConfig(
         level=logging.INFO,
@@ -452,7 +475,7 @@ if __name__ == "__main__":
     
     # Initialize the 
     
-    MEAN_REWARD_BOUND = 19.0  # self.env.spec.reward... has nothing inside that is why I am using this value
+    MEAN_REWARD_BOUND = 21.0  # self.env.spec.reward... has nothing inside that is why I am using this value
     
     agent = RainbowDQN_Agent(
         train_env=train_env,
@@ -461,9 +484,14 @@ if __name__ == "__main__":
         device=device,
         results_dir=results_dir
     )
-
+    log("Using the following DQN extensions:")
+    log(dqn_extensions)
+    
     wandb.config.update(all_configs)
 
     log("Training the agent...")
     agent.train()
-#
+
+
+#Save the model
+torch.save(agent.dnnetwork.state_dict(), f"{results_dir}/model.pth")

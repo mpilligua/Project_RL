@@ -12,11 +12,11 @@ prioritized_buffer_config = {
 
 # ----------------- Training Configs ----------------- #
 dqn_extensions = {
-    "use_noisy_dqn": True,
-    "use_double_dqn": True,
-    "use_two_step_dqn": True,
-    "use_dueling_dqn": True,
-    "use_prioritized_buffer": True
+    "use_noisy_dqn": False,
+    "use_double_dqn": False,
+    "use_two_step_dqn": False,
+    "use_dueling_dqn": False,
+    "use_prioritized_buffer": False
 }
 
 training_config = {
@@ -32,6 +32,7 @@ training_config = {
     "max_frames": 1000000,
     "dqn_extensions": dqn_extensions,
     "experience_replay_size": 10000,
+    "burn_in": 10000,
     "prioritized_buffer_config": prioritized_buffer_config
 }
 

@@ -8,10 +8,11 @@ import collections
 
 
 class ExperienceReplay:
-    def __init__(self, capacity):
+    def __init__(self, capacity, burn_in):
         self.buffer = collections.deque(maxlen=capacity)
         self.Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'combined_reward', 'combined_done', 'next_new_state'])
-
+        self.burn_in = burn_in
+        
     def __len__(self):
         return len(self.buffer)
 
@@ -24,7 +25,10 @@ class ExperienceReplay:
         
         return np.array(states), np.array(actions), np.array(combined_rewards, dtype=np.float32), \
                np.array(combined_dones, dtype=np.uint8), np.array(next_new_state)
-
+               
+    def burn_in_capacity(self):
+        return len(self.buffer) / self.burn_in
+    
 class ExpGrowthFactor:
     def __init__(self, epsilon, max_epsilon, growth_rate):
         self.epsilon = epsilon

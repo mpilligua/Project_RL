@@ -160,7 +160,7 @@ class Agent:
         return done_reward
 
 
-MEAN_REWARD_BOUND = 19.0 
+MEAN_REWARD_BOUND = 21.0 
 NUMBER_OF_REWARDS_TO_AVERAGE = 100        
 
 GAMMA = 0.99   
