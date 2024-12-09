@@ -24,7 +24,7 @@ training_config = {
     "learning_rate": 1e-4,
     "gamma": 0.99,
     "eps_start": 1.0,
-    "eps_decay": 0.9999,
+    "eps_decay": 0.9995,
     "eps_min": 0.02,
     "dnn_upd": 5,
     "dnn_sync": 1000,

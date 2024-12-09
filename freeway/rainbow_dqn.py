@@ -95,8 +95,10 @@ def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CRE
         
         state_ = np.array([current_state])
         state = torch.tensor(state_).to(device)
-        q_vals = net(state)
+        q_vals = net(state).cpu().detach().numpy()
         action = np.argmax(q_vals)
+        
+        current_state, reward, terminated, truncated, _ = env.step(action)
         
         # Add the step number to the upper-left corner of the image
         font = ImageFont.load_default() 
@@ -115,7 +117,6 @@ def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CRE
         text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
         draw.text((img_pil.width - text_width - 10, 10), reward_text, fill="white", font=font)
         
-        current_state, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated    
         total_reward += reward  
         images.append(img_pil)
@@ -215,7 +216,8 @@ class RainbowDQN_Agent:
         self.results_dir = results_dir
         
         # Reset any noise in the network if using Noisy DQN
-        self.reset_noise()
+        if self.use_noise_dqn:
+            self.reset_noise()
         
         # Initialize variables specific to each episode
         self._reset()
@@ -228,14 +230,15 @@ class RainbowDQN_Agent:
         def get_action(state):
             if mode == 'explore':
                 return self.train_env.action_space.sample()
-            elif np.random.random() < epsilon:
-                return self.train_env.action_space.sample()
-            else:
-                state_ = np.array([state])
-                state_tensor = torch.tensor(state_).to(device)
-                q_vals = self.dnnetwork(state_tensor)
-                _, act_ = torch.max(q_vals, dim=1)
-                return int(act_.item())
+            elif mode == "train":
+                if np.random.random() < epsilon:
+                    return self.train_env.action_space.sample()
+                else:
+                    state_ = np.array([state])
+                    state_tensor = torch.tensor(state_).to(device)
+                    q_vals = self.dnnetwork(state_tensor)
+                    _, act_ = torch.max(q_vals, dim=1)
+                    return int(act_.item())
         
         # First Step
         action = get_action(self.current_state)
@@ -328,7 +331,7 @@ class RainbowDQN_Agent:
                     log('\nEnvironment solved in {} episodes!'.format(episode))
                     break
                 
-                if episode % 50 == 0:
+                if episode % 20 == 0:
                     log("Visualizing the model...")
                     create_and_save_gif(self.dnnetwork, 
                                         eval_env,
@@ -419,17 +422,17 @@ if __name__ == "__main__":
     idx = time.strftime("%d%H%M")
     name_run = f"freeway_rainbow_{idx}"
     
-    run = wandb.init(project="Freeway", name=name_run)
-    results_dir = f"/ghome/mpilligua/RL/Project_RL/freeway/runs/{name_run}"
-
+    run = wandb.init(project="Freeway", name=name_run, entity="pilligua2")
+    #results_dir = f"/ghome/mpilligua/RL/Project_RL/freeway/runs/{name_run}"
+    results_dir = f"/fhome/pmlai10/Project_RL/freeway/runs/{name_run}"
+    
     os.makedirs(results_dir, exist_ok=True)
-
+    os.makedirs(f"{results_dir}/videos", exist_ok=True)
     # initialize logging file
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         filename=f"{results_dir}/log.log",
-        
     )
     logger = logging.getLogger(__name__)
     
@@ -448,7 +451,8 @@ if __name__ == "__main__":
         train_env=train_env,
         eval_env=eval_env, 
         config=training_config,
-        device=device
+        device=device,
+        results_dir=results_dir
     )
 
     wandb.config.update(all_configs)

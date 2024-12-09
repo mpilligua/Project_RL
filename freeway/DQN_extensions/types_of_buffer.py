@@ -24,7 +24,6 @@ class ExperienceReplay:
         
         return np.array(states), np.array(actions), np.array(combined_rewards, dtype=np.float32), \
                np.array(combined_dones, dtype=np.uint8), np.array(next_new_state)
-          
 
 class ExpGrowthFactor:
     def __init__(self, epsilon, max_epsilon, growth_rate):
@@ -35,7 +34,7 @@ class ExpGrowthFactor:
     def update(self):
         self.epsilon = min(self.max_epsilon, self.epsilon * self.growth_rate)
         return self.epsilon
-    
+
 class PrioritizedExperienceReplayBuffer:
     def __init__(self, memory_size=50000, burn_in=10000, alpha=0.6, small_constant=0.05, growth_rate = 1.0005, beta=0.4):
         self.memory_size = memory_size
