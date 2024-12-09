@@ -19,9 +19,11 @@ class ExperienceReplay:
     def append(self, current_state, action, combined_reward, combined_done, next_new_state):
         self.buffer.append(self.Experience(current_state, action, combined_reward, combined_done, next_new_state))
 
-    def sample(self, BATCH_SIZE):
-        indices = np.random.choice(len(self.buffer), BATCH_SIZE, replace=False)
+    def sample_batch(self, batch_size):
+        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
         states, actions, combined_rewards, combined_dones, next_new_state = zip(*[self.buffer[idx] for idx in indices])
+        
+        
         
         return np.array(states), np.array(actions), np.array(combined_rewards, dtype=np.float32), \
                np.array(combined_dones, dtype=np.uint8), np.array(next_new_state)
@@ -71,6 +73,7 @@ class PrioritizedExperienceReplayBuffer:
         normalized_weight = weights / weights.max()
 
         return idxs, experiences, normalized_weight
+
 
     def append(self, state, action, reward, done, next_state):
         priority = 1.0 if len(self.replay_memory) == 0 else self.sampling_probabilities.max()
