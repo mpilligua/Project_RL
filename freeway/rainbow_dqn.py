@@ -16,16 +16,11 @@ import gymnasium as gym
 import collections
 
 from PIL import Image
+from tqdm import tqdm
 
 import ale_py
 from PIL import ImageDraw, ImageFont
 import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 gym.register_envs(ale_py)
 
@@ -44,22 +39,23 @@ class ScaledFloatFrame(gym.ObservationWrapper):
 
 def make_env(env_name, skip=4, stack_size=4, reshape_size=(84, 84), render_mode=None):
     env = gym.make(env_name, render_mode=render_mode)
-    print("Standard Env.        : {}".format(env.observation_space.shape))
+    log("Standard Env.        : {}".format(env.observation_space.shape))
     env = MaxAndSkipObservation(env, skip=skip)
-    print("MaxAndSkipObservation: {}".format(env.observation_space.shape))
+    log("MaxAndSkipObservation: {}".format(env.observation_space.shape))
     env = ResizeObservation(env, reshape_size)
-    print("ResizeObservation    : {}".format(env.observation_space.shape))
+    log("ResizeObservation    : {}".format(env.observation_space.shape))
     env = GrayscaleObservation(env, keep_dim=True)
-    print("GrayscaleObservation : {}".format(env.observation_space.shape))
+    log("GrayscaleObservation : {}".format(env.observation_space.shape))
     env = ImageToPyTorch(env)
-    print("ImageToPyTorch       : {}".format(env.observation_space.shape))
+    log("ImageToPyTorch       : {}".format(env.observation_space.shape))
     env = ReshapeObservation(env, reshape_size)
-    print("ReshapeObservation   : {}".format(env.observation_space.shape))
+    log("ReshapeObservation   : {}".format(env.observation_space.shape))
     env = FrameStackObservation(env, stack_size=stack_size)
-    print("FrameStackObservation: {}".format(env.observation_space.shape))
+    log("FrameStackObservation: {}".format(env.observation_space.shape))
     env = ScaledFloatFrame(env)
-    print("ScaledFloatFrame     : {}".format(env.observation_space.shape))
+    log("ScaledFloatFrame     : {}".format(env.observation_space.shape))
     
+    env.spec.reward_threshold = 21.0
     return env
 
 class DQN(nn.Module):
@@ -209,6 +205,7 @@ class RainbowDQN_Agent:
         self.max_frames = config["max_frames"]
         self.dnn_upd_freq = config["dnn_upd"]
         self.dnn_sync_freq = config["dnn_sync"]
+        self.noise_upd_freq = config["noise_upd"]
         
         # Frame counter to keep track of the number of steps taken
         self.frame_number = 0
@@ -230,9 +227,9 @@ class RainbowDQN_Agent:
         
         def get_action(state):
             if mode == 'explore':
-                return self.env.action_space.sample()
+                return self.train_env.action_space.sample()
             elif np.random.random() < epsilon:
-                return self.env.action_space.sample()
+                return self.train_env.action_space.sample()
             else:
                 state_ = np.array([state])
                 state_tensor = torch.tensor(state_).to(device)
@@ -242,7 +239,7 @@ class RainbowDQN_Agent:
         
         # First Step
         action = get_action(self.current_state)
-        new_state, reward, terminated, truncated, _ = self.env.step(action)
+        new_state, reward, terminated, truncated, _ = self.train_env.step(action)
         is_done = terminated or truncated
         self.total_reward += reward
         
@@ -261,7 +258,7 @@ class RainbowDQN_Agent:
     
         if not is_done:  # Only take a second step if the first is not terminal
             next_action = get_action(new_state)
-            next_new_state, next_reward, terminated, truncated, _ = self.env.step(next_action)
+            next_new_state, next_reward, terminated, truncated, _ = self.train_env.step(next_action)
             next_done = terminated or truncated
             self.number_of_frames_per_episode += 1
         else:
@@ -285,7 +282,7 @@ class RainbowDQN_Agent:
         return done_reward, done_number_steps
 
     def train(self):
-        logger.info("Filling replay buffer...")
+        log("Filling replay buffer...")
 
         while self.buffer.burn_in_capacity() < 1:
             self.take_step(self.epsilon, mode='explore', device=device)
@@ -293,8 +290,10 @@ class RainbowDQN_Agent:
             if self.use_noise_dqn and (self.frame_number % self.noise_upd_freq == 0):
                 self.reset_noise()
             
+            print(f"Buffer size: {self.buffer.burn_in_capacity()}", end='\r') 
+            
         episode = 0
-        logger.info("Training...")
+        log("Training...")
 
         while True:
             self.frame_number +=1
@@ -313,7 +312,7 @@ class RainbowDQN_Agent:
                 self.number_of_frames_Episodes.append(done_number_steps)
                 mean_reward = np.mean(self.total_rewards[-NUMBER_OF_REWARDS_TO_AVERAGE:])
                 
-                logger.info(f"Frame:{self.frame_number} | Total games:{len(self.total_rewards)} | Mean reward: {mean_reward:.3f}  (epsilon used: {self.epsilon:.2f})")
+                log(f"Frame:{self.frame_number} | Total games:{len(self.total_rewards)} | Mean reward: {mean_reward:.3f}  (epsilon used: {self.epsilon:.2f})")
                 
                 wandb.log({"epsilon": self.epsilon, "reward_100": mean_reward, "reward": done_reward,
                             "Frames per episode": done_number_steps}, step=self.frame_number)
@@ -321,20 +320,20 @@ class RainbowDQN_Agent:
                 episode += 1
             
                 if self.frame_number >= self.max_frames:
-                    logger.info('\nFrame limit reached.')
+                    log('\nFrame limit reached.')
                     break
 
                 # The game ends if the average reward has reached the threshold
-                if mean_reward >= self.train_env.reward_threshold:
-                    logger.info('\nEnvironment solved in {} episodes!'.format(episode))
+                if mean_reward >= self.train_env.spec.reward_threshold:
+                    log('\nEnvironment solved in {} episodes!'.format(episode))
                     break
                 
-                if self.episode % 100 == 0:
-                    logger.info("Visualizing the model...")
+                if episode % 50 == 0:
+                    log("Visualizing the model...")
                     create_and_save_gif(self.dnnetwork, 
                                         eval_env,
                                         device=device, 
-                                        save_gif=f"{self.results_dir}/frame_{str(self.episode)}.gif",
+                                        save_gif=f"{self.results_dir}/videos/episode_{str(episode)}.gif",
                                         epoch=episode)
                 
             if self.epsilon is not None:         
@@ -386,7 +385,7 @@ class RainbowDQN_Agent:
                 module.reset_noise()
     
     def _reset(self):
-        self.current_state = self.env.reset()[0]
+        self.current_state = self.train_env.reset()[0]
         self.total_reward = 0
         self.number_of_frames_per_episode = 0
 
@@ -397,7 +396,7 @@ def setup_buffer(use_prioritized_buffer, config):
     
     if use_prioritized_buffer:
         buffer = PrioritizedExperienceReplayBuffer(
-            experience_replay_size=EXPERIENCE_REPLAY_SIZE,
+            memory_size=EXPERIENCE_REPLAY_SIZE,
             alpha=config_prioritized_buffer['alpha'],
             small_constant=config_prioritized_buffer['small_constant'],
             growth_rate=config_prioritized_buffer['growth_rate'],
@@ -406,6 +405,10 @@ def setup_buffer(use_prioritized_buffer, config):
     else:
         buffer = ExperienceReplay(capacity=EXPERIENCE_REPLAY_SIZE)
     return buffer
+
+def log(msg):
+    logger.info(msg)
+    print(msg, flush=True)
 
 if __name__ == "__main__":
     import os
@@ -416,17 +419,28 @@ if __name__ == "__main__":
     idx = time.strftime("%d%H%M")
     name_run = f"freeway_rainbow_{idx}"
     
-    wandb.init(project="Freeway", name=name_run)
-    results_dir = f"/fhome/pmlai10/Project_RL/freeway/{name_run}"
+    run = wandb.init(project="Freeway", name=name_run)
+    results_dir = f"/ghome/mpilligua/RL/Project_RL/freeway/runs/{name_run}"
 
     os.makedirs(results_dir, exist_ok=True)
-    print("Saving to: ", results_dir)
+
+    # initialize logging file
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        filename=f"{results_dir}/log.log",
+        
+    )
+    logger = logging.getLogger(__name__)
+    
+    log(msg=f"Saving to: {results_dir}")
+    log(f"Wandb run: {name_run} - {run.id}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # warnings.filterwarnings('ignore')
-
+    log(f"Initializing train environment with config: {train_env_config}")
     train_env = make_env(**train_env_config)
+    log(f"\nInitializing eval environment with config: {eval_env_config}")
     eval_env = make_env(**eval_env_config)
     
     # Initialize the agent
@@ -439,6 +453,6 @@ if __name__ == "__main__":
 
     wandb.config.update(all_configs)
 
-    print("Training the agent...", flush=True)
+    log("Training the agent...")
     agent.train()
 #
