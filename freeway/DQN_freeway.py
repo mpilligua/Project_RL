@@ -99,7 +99,7 @@ class ExperienceReplay:
 def create_and_save_gif(net, save_gif = 'video.gif'): # CREDITS JORDI
     env = make_env(ENV_NAME, render_mode='rgb_array')
     current_state = env.reset()[0]
-    print(current_state)
+
     is_done = False
     
     images = []
@@ -177,10 +177,22 @@ EPS_MIN = 0.02
 
 
 # start a new wandb run to track this script
+import time
 import os
-idx = os.listdir("/home/nbiescas/Desktop/freeway").__len__()
-wandb.init(project="Freeway", name=f"freeway_{idx}")
-os.makedirs(f"/home/nbiescas/Desktop/freeway/freeway_{idx}", exist_ok=True)
+
+
+idx = time.strftime("%d%H%M")
+name_run = f"freeway_dqn_{idx}"
+results_dir =  f"/home/nbiescas/probes/Reinforce/Project_RL/freeway/runs/{name_run}"
+
+run = wandb.init(project="Freeway", name=name_run, entity="pilligua2")
+#results_dir = f"/ghome/mpilligua/RL/Project_RL/freeway/runs/{name_run}"
+#results_dir = f"/fhome/pmlai10/Project_RL/freeway/runs/{name_run}"
+results_dir =  f"/home/nbiescas/probes/Reinforce/Project_RL/freeway/runs/{name_run}"
+
+os.makedirs(results_dir, exist_ok=True)
+os.makedirs(f"{results_dir}/videos", exist_ok=True)
+    
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -211,16 +223,15 @@ epsilon = EPS_START
 optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 total_rewards = []
 frame_number = 0  
-
+episode = 0
 while True:
     frame_number += 1
     epsilon = max(epsilon * EPS_DECAY, EPS_MIN)
 
     reward = agent.step(net, epsilon, device=device)
-    if frame_number % 10000 == 0:
-        create_and_save_gif(net.to("cuda"), save_gif=f"/home/nbiescas/Desktop/freeway/freeway_{idx}/frame_" + str(frame_number) + ".gif")
-        
+
     if reward is not None:
+        episode += 1
         total_rewards.append(reward)
 
         mean_reward = np.mean(total_rewards[-NUMBER_OF_REWARDS_TO_AVERAGE:])
@@ -230,6 +241,10 @@ while True:
         if mean_reward > MEAN_REWARD_BOUND:
             print(f"SOLVED in {frame_number} frames and {len(total_rewards)} games")
             break
+            
+        if episode % 20 == 0:
+            create_and_save_gif(net.to("cuda"), save_gif=f"{results_dir}/videos/episode_{str(episode)}.gif")
+        
 
     if len(buffer) < EXPERIENCE_REPLAY_SIZE:
         continue
@@ -255,6 +270,6 @@ while True:
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-
+    wandb.log({"loss": loss.item()}, step=frame_number)
     if frame_number % SYNC_TARGET_NETWORK == 0:
         target_net.load_state_dict(net.state_dict())

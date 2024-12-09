@@ -327,7 +327,7 @@ class RainbowDQN_Agent:
                     break
 
                 # The game ends if the average reward has reached the threshold
-                if mean_reward >= self.train_env.spec.reward_threshold:
+                if mean_reward >= MEAN_REWARD_BOUND:
                     log('\nEnvironment solved in {} episodes!'.format(episode))
                     break
                 
@@ -381,6 +381,8 @@ class RainbowDQN_Agent:
         self.optimizer.step()
         
         self.update_loss.append(loss.item())
+        wandb.log({"Loss": loss.item()}, step=self.frame_number)
+        
         
     def reset_noise(self):
         for module in self.dnnetwork.modules():
@@ -424,7 +426,9 @@ if __name__ == "__main__":
     
     run = wandb.init(project="Freeway", name=name_run, entity="pilligua2")
     #results_dir = f"/ghome/mpilligua/RL/Project_RL/freeway/runs/{name_run}"
-    results_dir = f"/fhome/pmlai10/Project_RL/freeway/runs/{name_run}"
+    #results_dir = f"/fhome/pmlai10/Project_RL/freeway/runs/{name_run}"
+    results_dir =  f"/home/nbiescas/probes/Reinforce/Project_RL/freeway/runs/{name_run}"
+    
     
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(f"{results_dir}/videos", exist_ok=True)
@@ -446,7 +450,10 @@ if __name__ == "__main__":
     log(f"\nInitializing eval environment with config: {eval_env_config}")
     eval_env = make_env(**eval_env_config)
     
-    # Initialize the agent
+    # Initialize the 
+    
+    MEAN_REWARD_BOUND = 19.0  # self.env.spec.reward... has nothing inside that is why I am using this value
+    
     agent = RainbowDQN_Agent(
         train_env=train_env,
         eval_env=eval_env, 
