@@ -21,13 +21,15 @@ class ExperienceReplay:
 
     def sample_batch(self, batch_size):
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
-        states, actions, combined_rewards, combined_dones, next_new_state = zip(*[self.buffer[idx] for idx in indices])
+        experiences = [self.buffer[idx] for idx in indices]
+
+        weights = np.ones(batch_size)
+        # states, actions, combined_rewards, combined_dones, next_new_state = zip(*[self.buffer[idx] for idx in indices])
         
-        
-        
-        return np.array(states), np.array(actions), np.array(combined_rewards, dtype=np.float32), \
-               np.array(combined_dones, dtype=np.uint8), np.array(next_new_state)
-               
+        # return np.array(states), np.array(actions), np.array(combined_rewards, dtype=np.float32), \
+        #        np.array(combined_dones, dtype=np.uint8), np.array(next_new_state)
+        return indices, experiences, weights
+
     def burn_in_capacity(self):
         return len(self.buffer) / self.burn_in
     
