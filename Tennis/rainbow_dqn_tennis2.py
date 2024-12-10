@@ -5,7 +5,9 @@ import wandb
 import warnings
 from torch import nn
 import torch.optim as optim
+import sys
 
+sys.path.append("/ghome/mpilligua/RL/Project_RL/freeway/")
 
 from DQN_extensions.types_of_buffer import ExperienceReplay, PrioritizedExperienceReplayBuffer
 from DQN_extensions.dqn_with_noise import Noisy_DQN
@@ -21,6 +23,7 @@ from tqdm import tqdm
 import ale_py
 from PIL import ImageDraw, ImageFont
 import logging
+import matplotlib.pyplot as plt
 
 gym.register_envs(ale_py)
 
@@ -43,20 +46,51 @@ class ForceDifferentAction(gym.RewardWrapper):
     """
     def __init__(self, env):
         super().__init__(env)
-        self.last_actions = collections.deque(maxlen=10)
+        self.last_actions = collections.deque(maxlen=15)
 
     def step(self, action):
         self.last_actions.append(action)
-        if len(self.last_actions) == 10 and all(a == self.last_actions[0] for a in self.last_actions):
-            state, reward, terminated, truncated, info = self.env.step(action)
-            return state, reward-100, terminated, truncated, info
-        
+        state, reward, terminated, truncated, info = self.env.step(action)
+        # print(f"Last actions: {self.last_actions}")
+        if len(self.last_actions) == 15 and all(a == self.last_actions[0] for a in self.last_actions):
+            return state, reward-100, True, truncated, info
+        else:
+            return state, reward, terminated, truncated, info
 
-def make_env(env_name, skip=4, stack_size=4, reshape_size=(84, 84), render_mode=None):
+class RewardLongPoints(gym.RewardWrapper):
+    """
+    If the agent loses a point, give a positive reward based on the number of frames it took to lose the point
+    """
+    def __init__(self, env, return_added_reward=False):
+        super().__init__(env)
+        self.frames = 0
+        self.last_reward = 0
+        self.return_added_reward = return_added_reward
+
+    def step(self, action):
+        state, reward, terminated, truncated, info = self.env.step(action)
+        
+        added_reward = 0
+        if reward < self.last_reward:
+            added_reward = min(self.frames, 150) / (150*2)
+            log(f"Added reward: {added_reward}")
+            reward += added_reward
+            self.frames = 0
+        else:
+            self.frames += 1
+
+        self.last_reward = reward
+        if self.return_added_reward:
+            return state, reward, added_reward, terminated, truncated, info
+        else:
+            return state, reward, terminated, truncated, info
+
+def make_env(env_name, skip=4, stack_size=4, reshape_size=(84, 84), render_mode=None, eval=False):
     env = gym.make(env_name, render_mode=render_mode)
     log("Standard Env.        : {}".format(env.observation_space.shape))
-    env = MaxAndSkipObservation(env, skip=skip)
-    log("MaxAndSkipObservation: {}".format(env.observation_space.shape))
+    if skip > 1:
+        env = MaxAndSkipObservation(env, skip=skip)
+        log("MaxAndSkipObservation: {}".format(env.observation_space.shape))
     env = ResizeObservation(env, reshape_size)
     log("ResizeObservation    : {}".format(env.observation_space.shape))
     env = GrayscaleObservation(env, keep_dim=True)
@@ -71,28 +105,51 @@ def make_env(env_name, skip=4, stack_size=4, reshape_size=(84, 84), render_mode=
     log("ScaledFloatFrame     : {}".format(env.observation_space.shape))
     env = ForceDifferentAction(env)
     log("ForceDifferentAction : {}".format(env.observation_space.shape))
-    env.spec.reward_threshold = 21.0
+    env = RewardLongPoints(env, return_added_reward=eval)
+    log("RewardLongPoints     : {}".format(env.observation_space.shape))
+    env.spec.reward_threshold = 100000000
     return env
 
-
-class DQN(torch.nn.Module):# CREDITS: Jordi 
-
-    def __init__(self, input_shape, output_shape, device='cpu'):
-        super(DQN, self).__init__()
+class DQN_NET(torch.nn.Module):
+    def __init__(self, input_shape, output_shape, device="cpu", dueling_layer=False):
+        super(DQN_NET, self).__init__()
         self.device = device
 
-        self.model = nn.Sequential(
-            nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(64*7*7, 512),
-            nn.ReLU(),
-            nn.Linear(512, output_shape)
-        )
+        self.conv1 = nn.Conv2d(input_shape[0], 64, kernel_size=3, stride=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=1)
+        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, stride=1)
+        self.conv4 = nn.Conv2d(256, 512, kernel_size=3, stride=1)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.linear1 = nn.Linear(512, 512)
+        self.linear2 = nn.Linear(512, output_shape)
+        self.relu = nn.ReLU()
+        self.dueling = dueling_layer
+
+        if dueling_layer:
+            self.dueling_layer = nn.Linear(512, output_shape)
+        self.to(device)
+
+    def forward(self, x):
+        x = self.conv1(x.to(self.device))
+        x = self.conv2(self.relu(x))
+        x = self.conv3(self.relu(x))
+        x = self.conv4(self.relu(x))
+        x = self.avgpool(self.relu(x))
+        x = x.view(x.size(0), -1)
+        x = self.linear1(self.relu(x))
+        x = self.linear2(self.relu(x))
+        if self.dueling:
+            advantage = self.dueling_layer(self.relu(x))
+            x += (advantage - advantage.mean())
+
+        return x
+
+class DQN2(torch.nn.Module):# CREDITS: Jordi     
+    def __init__(self, input_shape, output_shape, device="cpu", dueling_layer=False):
+        super(DQN2, self).__init__()
+        self.device = device
+
+        self.model = DQN_NET(input_shape, output_shape, device, dueling_layer)
 
     def get_action(self, state, epsilon=0.05):
         if np.random.random() < epsilon:
@@ -115,6 +172,11 @@ class DQN(torch.nn.Module):# CREDITS: Jordi
         state_t = torch.tensor(state, dtype=torch.float, device=self.device)
 
         return self.model(state_t)
+    
+    def forward(self, x):
+        return self.model(x)
+        
+
 
 def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CREDITS JORDI
     current_state = env.reset()[0]
@@ -124,7 +186,7 @@ def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CRE
     total_reward = 0.0
     t = 0
     
-    while not done:
+    while not done and t < 100:
         img = env.render()
         img_pil = Image.fromarray(img)
         draw = ImageDraw.Draw(img_pil) 
@@ -132,19 +194,20 @@ def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CRE
         state_ = np.array([current_state])
         state = torch.tensor(state_).to(device)
         q_vals = net(state).cpu().detach().numpy()
-        action = np.argmax(q_vals)
+        q_vals_probs = np.exp(q_vals) / np.sum(np.exp(q_vals))
+        action = np.random.choice(np.arange(len(q_vals_probs[0])), p=q_vals_probs[0])
         
-        current_state, reward, terminated, truncated, _ = env.step(action)
+        current_state, reward, added_reward, terminated, truncated, _ = env.step(action)
         
         # Add the step number to the upper-left corner of the image
         font = ImageFont.load_default() 
         draw.text((10, 10), f"Step: {t}", fill="white", font=font)
 
-        # Add the epoch number centered at the top of the image
+        # Add the epoch number centered at the bottom of the image
         epoch_text = f"Episode: {epoch}"
-        text_bbox = draw.textbbox((0, 0), epoch_text, font=font) 
+        text_bbox = draw.textbbox((0, 0), epoch_text, font=font)
         text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
-        draw.text(((img_pil.width - text_width) // 2, 10), epoch_text, fill="white", font=font)
+        draw.text(((img_pil.width - text_width) // 2, img_pil.height - text_height - 10), epoch_text, fill="white", font=font)
     
         # Add the current reward to the top-right corner of the image
         total_reward += reward
@@ -153,6 +216,19 @@ def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CRE
         text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
         draw.text((img_pil.width - text_width - 10, 10), reward_text, fill="white", font=font)
         
+        # Add the added reward in the top-right corner of the image below the reward
+        if added_reward != 0:
+            added_reward_text = f"Add: {added_reward:.2f}"
+            text_bbox = draw.textbbox((0, 0), added_reward_text, font=font)
+            text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
+            draw.text((img_pil.width - text_width - 10, 30), added_reward_text, fill="white", font=font)
+
+        # Add the action taken to the top-left corner of the image below the steps
+        action_text = f"Act: {action}"
+        text_bbox = draw.textbbox((0, 0), action_text, font=font)
+        text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
+        draw.text((10, 30), action_text, fill="white", font=font)
+
         done = terminated or truncated    
         total_reward += reward  
         images.append(img_pil)
@@ -208,8 +284,9 @@ class RainbowDQN_Agent:
             # Ensure consistent initialization by passing necessary parameters
             dnnetwork = Noisy_DQN(self.train_env.observation_space.shape, self.train_env.action_space.n, noisy_std = 0.1, device=device).to(device)
         else:
-            dnnetwork = DQN(self.train_env.observation_space.shape, self.train_env.action_space.n, device= device).to(device)
-
+            dnnetwork = DQN2(input_shape = self.train_env.observation_space.shape, 
+                             output_shape=self.train_env.action_space.n, device=device,
+                             dueling_layer=self.dqn_extensions['use_dueling_dqn']).to(device)
         
         # Networks
         self.dnnetwork = dnnetwork.to(device)
@@ -280,6 +357,10 @@ class RainbowDQN_Agent:
         # First Step
         action = get_action(self.current_state)
         new_state, reward, terminated, truncated, _ = self.train_env.step(action)
+        plt.imshow(new_state[0])
+        plt.savefig(f"{self.results_dir}/images/step_{self.number_of_frames_per_episode}.png")
+        exit(0)
+        # print(f"Action: {action} | Reward: {reward} | Terminated: {terminated} | Truncated: {truncated}")
         is_done = terminated or truncated
         self.total_reward += reward
         
@@ -308,9 +389,9 @@ class RainbowDQN_Agent:
     
         combined_reward = reward + self.gamma * next_reward
         combined_done = is_done or next_done
-    
+
         self.buffer.append(self.current_state, action, combined_reward, combined_done, next_new_state)
-        
+
         # Update the current state
         self.current_state = next_new_state
         
@@ -320,7 +401,7 @@ class RainbowDQN_Agent:
             self._reset()
         
         return done_reward, done_number_steps
-
+    
     def train(self):
         log("Filling replay buffer...")
 
@@ -345,7 +426,7 @@ class RainbowDQN_Agent:
                     
             if self.frame_number % self.dnn_sync_freq == 0:
                 self.target_network.load_state_dict(self.dnnetwork.state_dict())
-                
+
             if done_reward is not None:
                 # If the episode is done, log the results
                 self.total_rewards.append(done_reward)
@@ -364,12 +445,12 @@ class RainbowDQN_Agent:
                     break
 
                 # The game ends if the average reward has reached the threshold
-                if mean_reward >= MEAN_REWARD_BOUND:
+                if mean_reward >= self.train_env.spec.reward_threshold:
                     log('\nEnvironment solved in {} episodes!'.format(episode))
                     break
                 
-                if episode % 20 == 0:
-                    log("Visualizing the model...")
+                if episode % 1 == 0:
+                    log("Visualizing the model at episode {}".format(episode))
                     create_and_save_gif(self.dnnetwork, 
                                         eval_env,
                                         device=device, 
@@ -420,7 +501,6 @@ class RainbowDQN_Agent:
         self.update_loss.append(loss.item())
         wandb.log({"Loss": loss.item()}, step=self.frame_number)
         
-        
     def reset_noise(self):
         for module in self.dnnetwork.modules():
             if hasattr(module, 'reset_noise'):
@@ -435,7 +515,6 @@ class RainbowDQN_Agent:
 def setup_buffer(use_prioritized_buffer, config):
     EXPERIENCE_REPLAY_SIZE = config['experience_replay_size']
     config_prioritized_buffer = config['prioritized_buffer_config']
-    burn_in = config['burn_in']
     
     if use_prioritized_buffer:
         buffer = PrioritizedExperienceReplayBuffer(
@@ -446,7 +525,7 @@ def setup_buffer(use_prioritized_buffer, config):
             beta=config_prioritized_buffer['beta']
         )
     else:
-        buffer = ExperienceReplay(capacity=EXPERIENCE_REPLAY_SIZE, burn_in=burn_in)
+        buffer = ExperienceReplay(capacity=EXPERIENCE_REPLAY_SIZE, burn_in=config_prioritized_buffer['burn_in'])
     return buffer
 
 def log(msg):
@@ -459,18 +538,17 @@ if __name__ == "__main__":
     from configs.Rainbow_DQN import * # <--- All hyperparameters are defined here
     import logging
     
-    idx = time.strftime("%d%H%M")
-    name_run = f"freeway_rainbow_{idx}"
+    idx = time.strftime("%d%H%M%S")
+    name_run = f"Tennis_rainbow_{idx}"
     
-    run = wandb.init(project="Freeway", name=name_run, entity="pilligua2")
-    #results_dir = f"/ghome/mpilligua/RL/Project_RL/freeway/runs/{name_run}"
+    run = wandb.init(project="Freeway", name=name_run, entity="pilligua2", group="Tennis")
+    results_dir = f"/ghome/mpilligua/RL/Project_RL/Tennis/runs/{name_run}"
     #results_dir = f"/fhome/pmlai10/Project_RL/freeway/runs/{name_run}"
-    results_dir =  f"/home/nbiescas/probes/Reinforce/Project_RL/freeway/runs/{name_run}"
+    # results_dir =  f"/home/nbiescas/probes/Reinforce/Project_RL/freeway/runs/{name_run}"
     
     
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(f"{results_dir}/videos", exist_ok=True)
-    
     # initialize logging file
     logging.basicConfig(
         level=logging.INFO,
@@ -486,12 +564,13 @@ if __name__ == "__main__":
 
     log(f"Initializing train environment with config: {train_env_config}")
     train_env = make_env(**train_env_config)
+    
     log(f"\nInitializing eval environment with config: {eval_env_config}")
     eval_env = make_env(**eval_env_config)
     
     # Initialize the 
     
-    MEAN_REWARD_BOUND = 21.0  # self.env.spec.reward... has nothing inside that is why I am using this value
+    # MEAN_REWARD_BOUND = 19.0  # self.env.spec.reward... has nothing inside that is why I am using this value
     
     agent = RainbowDQN_Agent(
         train_env=train_env,
@@ -500,14 +579,9 @@ if __name__ == "__main__":
         device=device,
         results_dir=results_dir
     )
-    log("Using the following DQN extensions:")
-    log(dqn_extensions)
-    
+
     wandb.config.update(all_configs)
 
     log("Training the agent...")
     agent.train()
-
-
-#Save the model
-torch.save(agent.dnnetwork.state_dict(), f"{results_dir}/model.pth")
+#
