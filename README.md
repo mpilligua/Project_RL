@@ -7,10 +7,10 @@
 - **`Rainbow_dwn.py`**: Code to execute DQN with extensions.  
 
 ## Tennis
-    - Tennis/SB3_Tennis_A2C.py: 
-    - Tennis/SB3_TennisDetectPilotA2C.py.py
-    - Tennis/SB3_TennisDetectPilotPPO.py
-    - Tennis/SB3_TennisDetectPilotRNN.py
+    - Tennis/SB3_Tennis_A2C.py: Baseline PPO
+    - Tennis/SB3_TennisDetectPilotA2C.py: Baseline A2C
+    - Tennis/SB3_TennisDetectPilotPPO.py: Extended wrappers and Maskable A2C  
+    - Tennis/SB3_TennisDetectPilotRNN.py: Extended wrappers and Maskable PPO
     - Tennis/SB3_Tennis_ppo.py
 
 ## Pong  
