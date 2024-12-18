@@ -8,10 +8,9 @@
 
 ## Tennis
 - **`SB3_Tennis_A2C.py`**: Code to train a single agent in a tennis environment using Stable-Baselines3 and the A2C algorithm.  
-- **`SB3_TennisDetectPilotA2C.py`**: Code to train a tennis detection model with pilot extensions using Stable-Baselines3 and the A2C algorithm.  
-- **`SB3_TennisDetectPilotPPO.py`**: Code to train a tennis detection model with pilot extensions using Stable-Baselines3 and the Maskable PPO algorithm.  
-- **`SB3_TennisDetectPilotRNN.py`**: Code to train a tennis detection model using Stable-Baselines3 and Maskable PPO with recurrent neural networks (RNN).  
 - **`SB3_Tennis_ppo.py`**: Code to train a single agent in a tennis environment using Stable-Baselines3 and the PPO algorithm.  
+- **`SB3_TennisDetectPilotA2C.py`**: Code to train MaskableA2C using additional wrappers
+- **`SB3_TennisDetectPilotPPO.py`**: Code to train MaskablePPO using additional wrappers
 
 ## Pong  
 - **`MAS_tournament_ppo.py`**: Code to train two agents in a multi-environment setup using PettingZoo and a custom implementation of PPO.  
