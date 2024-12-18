@@ -29,7 +29,8 @@ A more complex Atari environment requiring the agent to learn hitting, positioni
 - **Algorithms**: Implemented **PPO**, **Maskable PPO**, and **A2C**. Enhanced Maskable PPO with wrappers for action masking, ball tracking, and intermediate rewards.  
 - **Results**: Maskable PPO significantly outperformed other models but could not win a full game due to environment complexity.  
 
-![Tennis Gameplay](path/to/tennis.gif)  
+![Tennis Gameplay](https://github.com/user-attachments/assets/d2b8daf9-7176-4402-98b9-56599a097304)
+
 
 ### 📂 Files  
 - **`SB3_Tennis_A2C.py`**: Train a single agent with A2C.  
@@ -47,7 +48,8 @@ Simulates a two-player table tennis game where agents compete to score points.
 - **Multi-Agent Approach**: Extended the Gym environment to PettingZoo, enabling two agents to train against each other.  
 - **Challenges**: Despite promising setups, agents converged to suboptimal strategies, focusing on serving rather than rallying.  
 
-![Pong Gameplay](path/to/pong.gif)  
+![Pong Gameplay](https://github.com/user-attachments/assets/8a4181df-b552-4592-a70e-1fbff6c80a7c)
+
 
 ### 📂 Files  
 - **`MAS_tournament_ppo.py`**: Train two agents with PettingZoo and PPO.  
