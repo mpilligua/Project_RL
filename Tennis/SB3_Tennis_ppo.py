@@ -401,7 +401,7 @@ if __name__ == "__main__":
     }
 
     # Instantiate the agent on the specified device
-    name_run = "TennisPPO3"
+    name_run = "TennisPPO3" # or "Tennis3"
     save_path = "/ghome/mpilligua/RL/Project_RL/Tennis/runs/" + name_run
     model = PPO("CnnPolicy", train_env, 
                 device=device, 
