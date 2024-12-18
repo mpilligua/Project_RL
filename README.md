@@ -19,3 +19,4 @@
 - **`MAS_tournament_reinforce.py`**: Code to train two agents in a multi-environment setup using PettingZoo and a custom implementation of Reinforce.  
 - **`MAS_tournament_reinforce_against_trained.py`**: Code to train two agents in a multi-environment setup using PettingZoo and a custom implementation of Reinforce, with additional functionality to load a PPO-trained single agent.  
 - **`single_agent_ppo.py`**: Code to train a single agent in a single-environment setup using Stable-Baselines PPO and a Gymnasium environment.  
+- **`LoadModels.py`**: Code containing all necessary functions and utilities to load the models for inference. The weights can be found in the repositories under the name: ppo_weight_right and ppo_weight_left.
