@@ -12,7 +12,9 @@ A classic Atari game where the agent controls a chicken trying to cross a multi-
 - **Algorithms**: Implemented **Deep Q-Networks (DQN)** with extensions like Double DQN, Dueling Networks, and Prioritized Replay Buffer. Also implemented **Reinforce**, a policy gradient algorithm, for comparison.  
 - **Results**: Achieved the optimal reward of 21 using DQN with basic preprocessing and Reinforce with policy gradient optimization.  
 
-![episode_140](https://github.com/user-attachments/assets/2aedba5b-4def-4da3-bfd8-c09f9042a347)
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/2aedba5b-4def-4da3-bfd8-c09f9042a347" alt="episode_140">
+</div>
 
 ### 📂 Files  
 - **`Freeway.ipynb`**: Notebook demonstrating the preprocessing pipeline.  
@@ -29,8 +31,9 @@ A more complex Atari environment requiring the agent to learn hitting, positioni
 - **Algorithms**: Implemented **PPO**, **Maskable PPO**, and **A2C**. Enhanced Maskable PPO with wrappers for action masking, ball tracking, and intermediate rewards.  
 - **Results**: Maskable PPO significantly outperformed other models but could not win a full game due to environment complexity.  
 
-![Tennis Gameplay](https://github.com/user-attachments/assets/d2b8daf9-7176-4402-98b9-56599a097304)
-
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/d2b8daf9-7176-4402-98b9-56599a097304" alt="episode_150">
+</div>
 
 ### 📂 Files  
 - **`SB3_Tennis_A2C.py`**: Train a single agent with A2C.  
@@ -48,7 +51,10 @@ Simulates a two-player table tennis game where agents compete to score points.
 - **Multi-Agent Approach**: Extended the Gym environment to PettingZoo, enabling two agents to train against each other.  
 - **Challenges**: Despite promising setups, agents converged to suboptimal strategies, focusing on serving rather than rallying.  
 
-![Pong Gameplay](https://github.com/user-attachments/assets/8a4181df-b552-4592-a70e-1fbff6c80a7c)
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/8a4181df-b552-4592-a70e-1fbff6c80a7c" alt="episode_150">
+</div>
 
 
 ### 📂 Files  
