@@ -6,7 +6,6 @@ import warnings
 from torch import nn
 import torch.optim as optim
 import sys
-import cv2
 
 sys.path.append("/ghome/mpilligua/RL/Project_RL/freeway/")
 
@@ -131,7 +130,6 @@ class CropObservation(gym.ObservationWrapper):
         return obs[:, :, self.top:self.top+self.height, self.left:self.left+self.width]
 
 
-
 class EndWhenLosePoint(gym.RewardWrapper):
     """
     If the agent loses a point, give a positive reward based on the number of frames it took to lose the point
@@ -148,73 +146,8 @@ class EndWhenLosePoint(gym.RewardWrapper):
             return state, reward, True, truncated, info
 
         return state, reward, terminated, truncated, info
-
-
-def is_ball_color(color):
-    """
-    Determines if a given RGB color belongs to the ball or the field.
-
-    Parameters:
-        color (tuple): RGB color to check, e.g., (R, G, B).
-
-    Returns:
-        bool: True if the color is identified as a ball color, False otherwise.
-    """
-    ball_colors = [
-        (137, 179, 156),  # Ball color 1
-        (183,205,193)   # Ball color 2
-    ]
-    field_colors = [
-        (45, 126, 82),    # Green
-        (147, 127, 100),  # Red
-        (120, 128, 224),   # Blue
-        (147, 127, 100),
-    ]
-
-    def euclidean_distance(c1, c2):
-        return np.sqrt(np.sum((np.array(c1) - np.array(c2)) ** 2))
-
-    # Threshold for deciding similarity (tuned empirically or as needed)
-    threshold = 50
-
-    # Compute distances to ball colors and field colors
-    ball_distances = [euclidean_distance(color, bc) for bc in ball_colors]
-    field_distances = [euclidean_distance(color, fc) for fc in field_colors]
-
-    # Check if the color is closer to any ball color than to field colors
-    return min(ball_distances) < min(field_distances) and min(ball_distances) < threshold
-
-
-
-class GetBallPosition(gym.ObservationWrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        self.last_ball_position = (0, 0)
-        self.maskara = cv2.imread('/ghome/mpilligua/RL/Project_RL/Tennis/MariaMaskara2.jpg')
-        self.maskara = self.maskara.mean(axis=-1)
-        _, self.maskara = cv2.threshold(self.maskara, 127, 255, cv2.THRESH_BINARY, self.maskara)
-        self.maskara = np.repeat(self.maskara[np.newaxis, :, :], 3, axis=0)
-        
-        self.observation_space = gym.spaces.Tuple((gym.spaces.Box(low=0, high=80, shape=(1, 1), dtype=np.float32),   
-                                                   gym.spaces.Box(low=0, high=1, shape=(env.observation_space.shape[0], 
-                                                                                        env.observation_space.shape[1],
-                                                                                        env.observation_space.shape[2]), dtype=np.float32)))
-
-
-
-    def observation(self, observation):
-        obs = observation[0] * self.maskara
-        
-        ball_coordinates = np.column_stack(np.where(np.apply_along_axis(is_ball_color, 0, obs))).T
-        if len(ball_coordinates) == 0:
-            ball_coordinates = self.last_ball_position
-        else:
-            self.last_ball_position = ball_coordinates[:, 0]
-        
-        print("inside wrapper", self.last_ball_position.shape)
-        return obs, self.last_ball_position
-            
-
+    
+    
 
 def make_env(env_name, skip=4, stack_size=4, reshape_size=(84, 84), render_mode=None, eval=False):
     env = gym.make(env_name, render_mode=render_mode)
@@ -250,37 +183,34 @@ def make_env(env_name, skip=4, stack_size=4, reshape_size=(84, 84), render_mode=
     env.spec.reward_threshold = 100000000
     return env
 
-
 class DQN_NET(torch.nn.Module):
     def __init__(self, input_shape, output_shape, device="cpu", dueling_layer=False):
         super(DQN_NET, self).__init__()
         self.device = device
 
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1)
+        self.conv1 = nn.Conv2d(input_shape[0], 64, kernel_size=3, stride=1)
         self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=1)
-        self.conv3 = nn.Conv2d(128, 128, kernel_size=3, stride=1)
-        self.conv4 = nn.Conv2d(128, 128, kernel_size=3, stride=1)
+        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, stride=1)
+        self.conv4 = nn.Conv2d(256, 512, kernel_size=3, stride=1)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.linear1 = nn.Linear(128+2, 128)
-        self.linear2 = nn.Linear(128, output_shape)
+        self.linear1 = nn.Linear(512, 512)
+        self.linear2 = nn.Linear(512, output_shape)
         self.relu = nn.ReLU()
         self.dueling = dueling_layer
 
 
         if dueling_layer:
-            self.dueling_layer = nn.Linear(128, output_shape)
+            self.dueling_layer = nn.Linear(512, output_shape)
         self.to(device)
 
-    def forward(self, x, ball_position):
-        print(x.shape, ball_position.shape)
+    def forward(self, x):
         x = self.conv1(x.to(self.device))
         x = self.conv2(self.relu(x))
         x = self.conv3(self.relu(x))
         x = self.conv4(self.relu(x))
         x = self.avgpool(self.relu(x))
         x = x.view(x.size(0), -1)
-        print(x.shape, ball_position.shape)
-        x = self.linear1(self.relu(torch.cat((ball_position, x), dim=1)))
+        x = self.linear1(self.relu(x))
         x = self.linear2(self.relu(x))
         if self.dueling:
             advantage = self.dueling_layer(self.relu(x))
@@ -297,28 +227,31 @@ class DQN2(torch.nn.Module):# CREDITS: Jordi
 
         self.model = DQN_NET(input_shape, output_shape, device, dueling_layer)
 
-    def get_action(self, state_0, state_1, epsilon=0.05):
+    def get_action(self, state, epsilon=0.05):
         if np.random.random() < epsilon:
 
             action = np.random.choice(self.actions)
         else:
 
-            qvals = self.get_qvals(state_0, state_1)
+            qvals = self.get_qvals(state)
             action= torch.max(qvals, dim=-1)[1].item()
 
         return action
 
-    def forward(self, state_0, state_1):
-        return self.model(state_0, state_1)
+    def forward(self, x):
+        return self.model(x)
     
-    def get_qvals(self, state_0, state_1):
-        # if type(state) is tuple:
-        #     state = np.array([np.ravel(s) for s in state])
+    def get_qvals(self, state):
+        if type(state) is tuple:
+            state = np.array([np.ravel(s) for s in state])
 
-        # state_t = torch.tensor(state, dtype=torch.float, device=self.device)
+        state_t = torch.tensor(state, dtype=torch.float, device=self.device)
 
-        return self.model(state_0, state_1)
+        return self.model(state_t)
     
+    def forward(self, x):
+        return self.model(x)
+        
 
 
 # def create_and_save_gif(net, env, device, save_gif='video.gif', epoch=0):  # CREDITS JORDI
@@ -423,7 +356,6 @@ class RainbowDQN_Agent:
         super().__init__()
         self.train_env = train_env
         self.eval_env = eval_env
-        self.device = device
         
         self.dqn_extensions = config['dqn_extensions']
         
@@ -433,7 +365,7 @@ class RainbowDQN_Agent:
             # Ensure consistent initialization by passing necessary parameters
             dnnetwork = Noisy_DQN(self.train_env.observation_space.shape, self.train_env.action_space.n, noisy_std = 0.1, device=device).to(device)
         else:
-            dnnetwork = DQN2(input_shape = self.train_env.observation_space, 
+            dnnetwork = DQN2(input_shape = self.train_env.observation_space.shape, 
                              output_shape=self.train_env.action_space.n, device=device,
                              dueling_layer=self.dqn_extensions['use_dueling_dqn']).to(device)
         
@@ -628,7 +560,6 @@ class RainbowDQN_Agent:
 
 
     def get_action(self, state, mode='explore', epsilon=None, return_q_values=False):
-        print(state[0].shape, state[1].shape)
         epsilon = self.epsilon if epsilon is None else epsilon
         q_values = np.zeros((1, self.train_env.action_space.n))
 
@@ -637,9 +568,9 @@ class RainbowDQN_Agent:
         
         elif mode == "train":
             if np.random.random() < epsilon:
-                state_0, state_1 = np.array([state[0]], dtype=np.float32) , np.array([state[1]], dtype=np.float32)
-                state_0, state_1 = torch.tensor(state_0).to(self.device), torch.tensor(state_1).to(self.device)
-                q_vals = self.dnnetwork(state_0, state_1)
+                state_ = np.array([state])
+                state_tensor = torch.tensor(state_).to(device)
+                q_vals = self.dnnetwork(state_tensor)
                 action = self.train_env.action_space.sample()
         
                 if return_q_values:
@@ -647,9 +578,9 @@ class RainbowDQN_Agent:
                 return action
             
             else:
-                state_0, state_1 = np.array([state[0]]) , np.array([state[1]])
-                state_0, state_1 = torch.tensor(state_0).to(self.device), torch.tensor(state_1).to(self.device)
-                q_vals = self.dnnetwork(state_0, state_1)
+                state_ = np.array([state])
+                state_tensor = torch.tensor(state_).to(device)
+                q_vals = self.dnnetwork(state_tensor)
                 _, act_ = torch.max(q_vals, dim=1)
                 if return_q_values:
                     q_values = q_vals.cpu().detach().numpy()
@@ -709,7 +640,7 @@ class RainbowDQN_Agent:
     def train(self):
         log("Filling replay buffer...")
 
-        while self.buffer.burn_in_capacity() < 0.01:
+        while self.buffer.burn_in_capacity() < 1:
             self.take_step(mode='explore')
             self.frame_number += 1
             if self.use_noise_dqn and (self.frame_number % self.noise_upd_freq == 0):
@@ -851,6 +782,42 @@ def log(msg):
     logger.info(msg)
     print(msg, flush=True)
 
+
+def is_ball_color(color):
+    """
+    Determines if a given RGB color belongs to the ball or the field.
+
+    Parameters:
+        color (tuple): RGB color to check, e.g., (R, G, B).
+
+    Returns:
+        bool: True if the color is identified as a ball color, False otherwise.
+    """
+    ball_colors = [
+        (137, 179, 156),  # Ball color 1
+        (183,205,193)   # Ball color 2
+    ]
+    field_colors = [
+        (45, 126, 82),    # Green
+        (147, 127, 100),  # Red
+        (120, 128, 224),   # Blue
+        (147, 127, 100),
+    ]
+
+    def euclidean_distance(c1, c2):
+        return np.sqrt(np.sum((np.array(c1) - np.array(c2)) ** 2))
+
+    # Threshold for deciding similarity (tuned empirically or as needed)
+    threshold = 50
+
+    # Compute distances to ball colors and field colors
+    ball_distances = [euclidean_distance(color, bc) for bc in ball_colors]
+    field_distances = [euclidean_distance(color, fc) for fc in field_colors]
+
+    # Check if the color is closer to any ball color than to field colors
+    return min(ball_distances) < min(field_distances) and min(ball_distances) < threshold
+
+
 if __name__ == "__main__":
     import os
     import time
@@ -860,7 +827,6 @@ if __name__ == "__main__":
     idx = time.strftime("%d%H%M%S")
     name_run = f"Tennis_rainbow_{idx}"
     
-    run = wandb.init(project="Freeway", name=name_run, entity="pilligua2", group="Tennis")
     results_dir = f"/ghome/mpilligua/RL/Project_RL/Tennis/runs/{name_run}"
     #results_dir = f"/fhome/pmlai10/Project_RL/freeway/runs/{name_run}"
     # results_dir =  f"/home/nbiescas/probes/Reinforce/Project_RL/freeway/runs/{name_run}"
@@ -877,7 +843,7 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     
     log(msg=f"Saving to: {results_dir}")
-    log(f"Wandb run: {name_run} - {run.id}")
+    #log(f"Wandb run: {name_run} - {run.id}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -891,24 +857,46 @@ if __name__ == "__main__":
     
     # MEAN_REWARD_BOUND = 19.0  # self.env.spec.reward... has nothing inside that is why I am using this value
     
+
+    obs, _ = train_env.reset()
     
-    if training_config['number_of_actions'] == 'reduce':
-        log("Reducing the number of actions to 6")
-        train_env.action_space.n = 6
-        eval_env.action_space.n = 6
+    train_env.step(0)
+    train_env.step(0)
+    train_env.step(0)
+    train_env.step(0)
+    obs, _, _, _, _ = train_env.step(0)
     
-    agent = RainbowDQN_Agent(
-        train_env=train_env,
-        eval_env=eval_env, 
-        config=training_config,
-        device=device,
-        results_dir=results_dir
-    )
+    import cv2
+    maskara = cv2.imread('/ghome/mpilligua/RL/Project_RL/Tennis/MariaMaskara2.jpg')
+    maskara = maskara.mean(axis=-1)
+    cv2.imwrite('maskara.png', maskara)
+    for i in range(10):
+        obs, _, _, _, _ = train_env.step(1)
+        _, maskara = cv2.threshold(maskara, 127, 255, cv2.THRESH_BINARY, maskara)
+        
+        
+        maskara_3ch = np.repeat(maskara[np.newaxis, :, :], 3, axis=0)
+        obs = obs[0] * maskara_3ch
+        obs = np.moveaxis(obs, 0, -1)
+        
+        cv2.imwrite(f'obs{i}.png', obs)
+        
+        ball_coordinates = np.column_stack(np.where(np.apply_along_axis(is_ball_color, -1, obs)))
+        if len(ball_coordinates) == 0:
+            print('Ball not found')
+            continue
+        
+        print(ball_coordinates.shape)
+        # y, x = ball_coordinates.T
+        
+        # obs[y, x] = 255
+        # cv2.imwrite(f'obs{i}.png', obs)
+    
 
-
-
-    wandb.config.update(all_configs)
-
-    log("Training the agent...")
-    agent.train()
-#
+    
+    
+    
+    
+    
+    
+    

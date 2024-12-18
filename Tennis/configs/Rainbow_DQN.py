@@ -19,6 +19,8 @@ dqn_extensions = {
     "use_prioritized_buffer": False
 }
 
+
+
 training_config = {
     "batch_size": 32,
     "learning_rate": 1e-4,
@@ -31,8 +33,11 @@ training_config = {
     "noise_upd": 11000,
     "max_frames": 1000000,
     "dqn_extensions": dqn_extensions,
-    "experience_replay_size": 10000,
-    "prioritized_buffer_config": prioritized_buffer_config
+    "experience_replay_size": 1000000,
+    "prioritized_buffer_config": prioritized_buffer_config,
+    ## Scheduler Configs
+    "scheduler": {"type_scheduler": "cosine", "t_max": 5000, 'eta_min': 1e-6}, # If you dont want scheduler just set scheduler: None
+    "number_of_actions": "reduce"
 }
 
 # ----------------- Env Configs ----------------- #
@@ -41,7 +46,7 @@ train_env_config = {
     "env_name": "ALE/Tennis-v5",
     "skip": 4,
     "stack_size": 4,
-    "reshape_size": (84, 84),
+    "reshape_size": (3, 84, 84),
     "render_mode": None
 }
 
@@ -49,7 +54,7 @@ eval_env_config = {
     "env_name": "ALE/Tennis-v5",
     "skip": 1,
     "stack_size": 4,
-    "reshape_size": (84, 84),
+    "reshape_size": (3, 84, 84),
     "render_mode": 'rgb_array',
     "eval": True,
 }
@@ -60,3 +65,6 @@ all_configs = {
     "train_env_config": train_env_config,
     "eval_env_config": eval_env_config,
 }
+
+
+
