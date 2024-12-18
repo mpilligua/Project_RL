@@ -12,7 +12,7 @@ A classic Atari game where the agent controls a chicken trying to cross a multi-
 - **Algorithms**: Implemented **Deep Q-Networks (DQN)** with extensions like Double DQN, Dueling Networks, and Prioritized Replay Buffer. Also implemented **Reinforce**, a policy gradient algorithm, for comparison.  
 - **Results**: Achieved the optimal reward of 21 using DQN with basic preprocessing and Reinforce with policy gradient optimization.  
 
-![Freeway Gameplay](path/to/freeway.gif)  
+![episode_140](https://github.com/user-attachments/assets/2aedba5b-4def-4da3-bfd8-c09f9042a347)
 
 ### 📂 Files  
 - **`Freeway.ipynb`**: Notebook demonstrating the preprocessing pipeline.  
