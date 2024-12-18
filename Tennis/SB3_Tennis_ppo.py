@@ -355,25 +355,13 @@ def make_env(num_envs=1, skip=4, stack_size=4, reshape_size=(84, 84), eval=False
     log("ImageToPyTorch       : {}".format(env.observation_space.shape))
     env = ReshapeObservation(env, (3, 84, 84))
     log("ReshapeObservation   : {}".format(env.observation_space.shape))
-    env = Keep_red_dim(env)
-    log("Keep_red_dim         : {}".format(env.observation_space.shape))
-    env = FrameStackObservation(env, stack_size=stack_size)
-    log("FrameStackObservation: {}".format(env.observation_space.shape))
-    # env = CropObservation(env, 5, 6, 80, 80)    
-    # log("CropObservation      : {}".format(env.observation_space.shape))
+    env = GrayscaleObservation(env)
+    log("GrayscaleObservation : {}".format(env.observation_space.shape))
     env = ScaledFloatFrame(env)
     log("ScaledFloatFrame     : {}".format(env.observation_space.shape))
-    # env = ForceDifferentAction(env)
-    # log("ForceDifferentAction : {}".format(env.observation_space.shape))
-    # env = RewardLongPoints(env, return_added_reward=eval)
-    # log("RewardLongPoints     : {}".format(env.observation_space.shape))
-    # if not eval:
-    env = EndWhenLosePoint(env)
-    log("EndWhenLosePoint     : {}".format(env.observation_space.shape))
-    env = MapActions(env)
-    # env = GetBallPosition(env)
-    env = ForceFireOnFirstMove(env)
-    
+    env = FrameStackObservation(env, stack_size=stack_size)
+    log("FrameStackObservation: {}".format(env.observation_space.shape))
+
     env.spec.reward_threshold = 100000000
     return env
     
